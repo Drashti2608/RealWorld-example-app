@@ -1,0 +1,435 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Term Project By Rahul Salya B00946531.
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+    Default: TP
+
+Resources:
+  MyVPC: # VPC
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock: "10.0.0.0/20"
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-VPC
+
+  InternetGateway: # Internet Gateway
+    Type: AWS::EC2::InternetGateway
+    DependsOn: MyVPC
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-InternetGateway
+
+  InternetGatewayAttachment: # Internet Gateway Attachment
+    Type: AWS::EC2::VPCGatewayAttachment
+    DependsOn: InternetGateway
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref MyVPC
+
+  # Subnets
+  PublicSubnet01AZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: "10.0.0.0/27"
+      AvailabilityZone: "us-east-1a"
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-AZ1-PublicSubnet01
+
+  PublicSubnet01AZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: "10.0.1.0/27"
+      AvailabilityZone: "us-east-1b"
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-AZ2-PublicSubnet01
+
+  PrivateSubnet01AZ1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: "10.0.0.32/27"
+      AvailabilityZone: "us-east-1a"
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-AZ1-PrivateSubnet01
+
+  PrivateSubnet01AZ2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: "10.0.1.32/27"
+      AvailabilityZone: "us-east-1b"
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-AZ2-PrivateSubnet01
+
+  NATElasticIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-ElasticIP
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    DependsOn: PublicSubnet01AZ1
+    Properties:
+      ConnectivityType: public
+      AllocationId: !GetAtt NATElasticIP.AllocationId
+      SubnetId: !GetAtt PublicSubnet01AZ1.SubnetId
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-NatGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-PublicRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-MainRouteTable
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  DefaultPrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: NatGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PublicSubnet01AZ1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn: DefaultPublicRoute
+    Properties:
+      SubnetId: !Ref PublicSubnet01AZ1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet01AZ2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn: DefaultPublicRoute
+    Properties:
+      SubnetId: !Ref PublicSubnet01AZ2
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateSubnet01AZ1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn: DefaultPrivateRoute
+    Properties:
+      SubnetId: !Ref PrivateSubnet01AZ1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet01AZ2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn: DefaultPrivateRoute
+    Properties:
+      SubnetId: !Ref PrivateSubnet01AZ2
+      RouteTableId: !Ref PrivateRouteTable
+
+  MyPostgreDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "Subnets for Aurora PostgreSQL RDS Instances"
+      DBSubnetGroupName: !Sub ${EnvironmentName}-MySQLDBSubnetGroup
+      SubnetIds:
+        - !GetAtt PrivateSubnet01AZ1.SubnetId
+        - !GetAtt PrivateSubnet01AZ2.SubnetId
+
+  # Security Groups
+  AppTierSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvironmentName}-AppTier-SecurityGroup
+      GroupDescription: "Security group for App Tier"
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          Description: "Allow HTTP from App Tier Load Balancer"
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+        - CidrIp: 0.0.0.0/0
+          Description: "Allow HTTPs from App Tier Load Balancer"
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+        - CidrIp: 0.0.0.0/0
+          Description: "Allow SSH from Bastion Host"
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-AppTier-SecurityGroup
+
+  AppTierLBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvironmentName}-AppTierLB-SecurityGroup
+      GroupDescription: "Security group for App Tier Load Balancer"
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          Description: "Allow HTTP from Internet"
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+        - CidrIp: 0.0.0.0/0
+          Description: "Allow HTTPs from Internet"
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+
+  MyDBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${EnvironmentName}-MyDB-SecurityGroup
+      GroupDescription: "Security group for MyDB"
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !GetAtt AppTierSecurityGroup.GroupId
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-MyDB-SecurityGroup
+
+  MyKMSKey:
+    Type: "AWS::KMS::Key"
+    Properties:
+      Description: "My KMS Key with Custom Policy"
+      KeyPolicy:
+        Version: "2012-10-17"
+        Id: "key-consolepolicy-3"
+        Statement:
+          - Sid: "Enable IAM User Permissions"
+            Effect: "Allow"
+            Principal:
+              AWS: "arn:aws:iam::693896046544:root"
+            Action: "kms:*"
+            Resource: "*"
+      Tags:
+        - Key: Name
+          Value: MyCustomKMSKey
+
+  MyPostgreDatabase:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      Engine: aurora-postgresql
+      EngineVersion: 15.3
+      Port: 5432
+      AvailabilityZones:
+        - !Sub ${AWS::Region}a
+        - !Sub ${AWS::Region}b
+      DatabaseName: database_development
+      DBClusterIdentifier: !Sub ${EnvironmentName}-MyPostgreDatabase
+      DBSubnetGroupName: !Ref MyPostgreDBSubnetGroup
+      VpcSecurityGroupIds:
+        - !GetAtt MyDBSecurityGroup.GroupId
+      MasterUsername: rahul
+      MasterUserPassword: rahul123
+      StorageEncrypted: true
+      KmsKeyId: !Ref MyKMSKey
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-MyPostgreDatabase
+
+  MyPostgreDBInstanceZoneA:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: db.t3.medium
+      Engine: aurora-postgresql
+      AvailabilityZone: !Sub ${AWS::Region}a
+      EngineVersion: 15.3
+      StorageEncrypted: true
+      DBClusterIdentifier: !Ref MyPostgreDatabase
+      DBInstanceIdentifier: !Sub ${EnvironmentName}-MyPostgreDBInstanceZoneA
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-MyPostgreDBInstanceZoneA
+
+  MyPostgreDBInstanceZoneB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: db.t3.medium
+      Engine: aurora-postgresql
+      AvailabilityZone: !Sub ${AWS::Region}b
+      EngineVersion: 15.3
+      StorageEncrypted: true
+      DBClusterIdentifier: !Ref MyPostgreDatabase
+      DBInstanceIdentifier: !Sub ${EnvironmentName}-MyPostgreDBInstanceZoneB
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-MyPostgreDBInstanceZoneB
+
+  AppEc2Instance01:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - MyPostgreDatabase
+      - MyPostgreDBInstanceZoneA
+      # - MyPostgreDBInstanceZoneB
+    Properties:
+      InstanceType: t2.micro
+      ImageId: ami-0230bd60aa48260c6
+      KeyName: TermProject
+      SubnetId: !Ref PublicSubnet01AZ1
+      SecurityGroupIds:
+        - !GetAtt AppTierSecurityGroup.GroupId
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-AppEc2Instance01
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          cd /home/ec2-user
+          sudo yum install git nodejs iptables -y
+          git clone https://github.com/RHSaliya/conduit-realworld-example-app.git
+          cd conduit-realworld-example-app
+          sudo echo "## Environment Variables
+          PORT=3001
+          JWT_KEY=supersecretkey_example
+
+          ## Development Database
+          DEV_DB_USERNAME=rahul
+          DEV_DB_PASSWORD=rahul123
+          DEV_DB_NAME=database_development
+          DEV_DB_HOSTNAME=${MyPostgreDatabase.Endpoint.Address}
+          DEV_DB_DIALECT=postgres
+          DEV_DB_LOGGGIN=true" > ./backend/.env
+          sudo npm i
+          sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 3000
+          sudo iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 3000
+          sudo npm run dev
+
+  AppEc2Instance02:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - MyPostgreDatabase
+      - MyPostgreDBInstanceZoneA
+      # - MyPostgreDBInstanceZoneB
+    Properties:
+      InstanceType: t2.micro
+      ImageId: ami-0230bd60aa48260c6
+      KeyName: TermProject
+      SubnetId: !Ref PublicSubnet01AZ2
+      SecurityGroupIds:
+        - !GetAtt AppTierSecurityGroup.GroupId
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-AppEc2Instance02
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          cd /home/ec2-user
+          sudo yum install git nodejs iptables -y
+          git clone https://github.com/RHSaliya/conduit-realworld-example-app.git
+          cd conduit-realworld-example-app
+          sudo echo "## Environment Variables
+          PORT=3001
+          JWT_KEY=supersecretkey_example
+
+          ## Development Database
+          DEV_DB_USERNAME=rahul
+          DEV_DB_PASSWORD=rahul123
+          DEV_DB_NAME=database_development
+          DEV_DB_HOSTNAME=${MyPostgreDatabase.Endpoint.Address}
+          DEV_DB_DIALECT=postgres
+          DEV_DB_LOGGGIN=true" > ./backend/.env
+          sudo npm i
+          sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 3000
+          sudo iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 3000
+          sudo npm run dev
+
+  AppTierLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn:
+      - InternetGatewayAttachment
+    Properties:
+      Name: !Sub ${EnvironmentName}-AppTierLoadBalancer
+      Scheme: internet-facing
+      Subnets:
+        - !Ref PublicSubnet01AZ1
+        - !Ref PublicSubnet01AZ2
+      SecurityGroups:
+        - !GetAtt AppTierLBSecurityGroup.GroupId
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-AppTierLoadBalancer
+
+  AppTierTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-AppTierTargetGroup
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref MyVPC
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      HealthCheckPath: /conduit-realworld-example-app/frontend/index.html
+      UnhealthyThresholdCount: 2
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
+        - Key: stickiness.enabled
+          Value: true
+        - Key: stickiness.type
+          Value: lb_cookie
+        - Key: stickiness.lb_cookie.duration_seconds
+          Value: 86400
+      Targets:
+        - Id: !Ref AppEc2Instance01
+          Port: 80
+        - Id: !Ref AppEc2Instance02
+          Port: 80
+      Matcher:
+        HttpCode: 200
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-AppTierTargetGroup
+
+  AppTierListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref AppTierLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref AppTierTargetGroup
+
+Outputs:
+  LoadBalancerDNS:
+    Description: DNS Name of the Load Balancer
+    Value: !GetAtt AppTierLoadBalancer.DNSName
