@@ -12,6 +12,9 @@ const articlesRoutes = require("./routes/articles");
 const profilesRoutes = require("./routes/profiles");
 const tagsRoutes = require("./routes/tags");
 
+const createArticle = require("./seeders/create-article");
+const createUser = require("./seeders/create-user");
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -25,6 +28,9 @@ app.use(express.json());
   }
 })();
 
+createArticle.up();
+createUser.up();
+
 if (process.env.NODE_ENV === "production") {
   app.use(express.static("../frontend/dist"));
 } else {
@@ -36,10 +42,10 @@ app.use("/api/articles", articlesRoutes);
 app.use("/api/profiles", profilesRoutes);
 app.use("/api/tags", tagsRoutes);
 app.get("*", (req, res) =>
-  res.status(404).json({ errors: { body: ["Not found"] } }),
+  res.status(404).json({ errors: { body: ["Not found"] } })
 );
 app.use(errorHandler);
 
 app.listen(PORT, () =>
-  console.log(`Server running on http://localhost:${PORT}`),
+  console.log(`Server running on http://localhost:${PORT}`)
 );
