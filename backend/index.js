@@ -23,13 +23,18 @@ app.use(express.json());
   try {
     await sequelize.sync({ alter: true });
     console.log(`Connection with ${env} database has been established.`);
+
+    // Run seeders after database sync
+    await createUser
+      .up(sequelize.queryInterface, sequelize)
+      .then(() => console.log("User Created successfully"));
+    await createArticle
+      .up(sequelize.queryInterface, sequelize)
+      .then(() => console.log("Article Created successfully"));
   } catch (error) {
     console.error("Unable to connect to the database:", error);
   }
 })();
-
-createArticle.up();
-createUser.up();
 
 if (process.env.NODE_ENV === "production") {
   app.use(express.static("../frontend/dist"));
